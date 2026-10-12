@@ -45,6 +45,7 @@ import {
   TriangleToolbarItem,
   XBoxToolbarItem,
   createShapeId,
+  createShapesForAssets,
   DEFAULT_EMBED_DEFINITIONS,
   onDragFromToolbarToCreateShape,
   startEditingShapeWithRichText,
@@ -61,6 +62,7 @@ import { getAssetUrlsByImport } from '@tldraw/assets/imports.vite'
 import { AllSelection } from '@tiptap/pm/state'
 import { renderHtmlDraftDocument } from './htmlDraftCapture.js'
 import { cowartAssetCacheKey, cowartBlobFromBase64, createCowartAssetObjectUrlCache } from './cowartAssetCache.js'
+import { MAX_VIDEO_BYTES, normalizeVideoFile, probeVideoFile, validateMediaFileSize, insertVideoAsset } from './videoImport.js'
 import { attachCowartFilmController } from './filmPlayback.js'
 import { renderCowartFilmMp4 } from './filmExport.js'
 import { getFilmOptions, buildFilmGenerationPrompt } from './filmConfig.js'
@@ -334,7 +336,10 @@ const cowartPendingSlidesPastes = new WeakMap()
 const cowartCopiedContent = new WeakMap()
 
 const cowartTldrawAssetStore = {
-  upload: async (_asset, file) => ({ src: await readFileAsDataUrl(file) }),
+  upload: async (_asset, file) => {
+    validateMediaFileSize(file)
+    return { src: await readFileAsDataUrl(file) }
+  },
   resolve: resolveCowartTldrawAssetUrl
 }
 
@@ -5980,6 +5985,39 @@ function CowartToolbarDivider() {
   return <div aria-orientation="vertical" className="cowart-toolbar-divider" role="separator" />
 }
 
+function CowartVideoImportToolbarItem() {
+  const editor = useEditor()
+  const { addToast } = useToasts()
+  const inputRef = useRef(null)
+  const [busy, setBusy] = useState(false)
+
+  async function importVideo(event) {
+    const selected = event.target.files?.[0]
+    event.target.value = ''
+    if (!selected) return
+    setBusy(true)
+    try {
+      const file = normalizeVideoFile(selected)
+      await probeVideoFile(file, { document: editor.getContainerDocument() })
+      await insertVideoAsset(editor, file, createShapesForAssets)
+      addToast({ title: '视频已导入', description: '双击视频即可播放、暂停或拖动进度。', severity: 'success' })
+    } catch (error) {
+      addToast({ title: '视频导入失败', description: error instanceof Error ? error.message : '请换一个文件重试。', severity: 'error' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <>
+    <button type="button" className="tlui-button tlui-button__tool cowart-annotation-toolbar-button"
+      aria-label="导入视频" title="导入视频（最大 50 MB，双击播放）" data-testid="tools.cowart-video-import"
+      disabled={busy} onClick={() => inputRef.current?.click()}>
+      <Film size={20} /><span className="cowart-annotation-toolbar-label">{busy ? '读取中' : '导入视频'}</span>
+    </button>
+    <input ref={inputRef} type="file" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov" hidden onChange={importVideo} />
+  </>
+}
+
 function CowartToolbar(props) {
   return (
     <CowartDraggableToolbar {...props} maxItems={12}>
@@ -5993,6 +6031,7 @@ function CowartToolbar(props) {
       <CowartToolbarItem toolId={AI_SLIDES_TOOL_ID} />
       <CowartToolbarDivider />
       <AssetToolbarItem />
+      <CowartVideoImportToolbarItem />
       <DrawToolbarItem />
       <EraserToolbarItem />
       <TextToolbarItem />
@@ -6625,6 +6664,7 @@ export default function App() {
         snapshot={snapshot ?? undefined}
         assetUrls={cowartAssetUrls}
         assets={cowartTldrawAssetStore}
+        maxAssetSize={MAX_VIDEO_BYTES}
         inferDarkMode
         onMount={handleMount}
         options={cowartTldrawOptions}
