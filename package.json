@@ -30,7 +30,7 @@
     "probe:mcp:integrity": "node ./scripts/probe-mcp-integrity.mjs",
     "probe:widget:memory": "node ./scripts/probe-widget-memory.mjs",
     "probe:widget:browser": "node ./scripts/probe-widget-browser.mjs",
-    "probe:video": "node ./scripts/probe-video-import.mjs && node ./scripts/probe-video-storage.mjs"
+    "probe:video": "node ./scripts/probe-video-import.mjs && node ./scripts/probe-video-storage.mjs && node ./scripts/probe-video-frame.mjs"
   },
   "devDependencies": {
     "@modelcontextprotocol/ext-apps": "^1.7.4",

@@ -68,6 +68,7 @@ import { renderCowartFilmMp4 } from './filmExport.js'
 import { getFilmOptions, buildFilmGenerationPrompt } from './filmConfig.js'
 import { FilmStyleButtons } from './FilmStyleButtons.jsx'
 import { CowartDraggableToolbar } from './CowartDraggableToolbar.jsx'
+import { CowartVideoToolbar, CowartVideoFrameExtractionOverlay } from './CowartVideoFrameExtraction.jsx'
 import { filmAnalyticsContext, withFilmExportAnalytics } from './filmAnalytics.js'
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Download, FileCode, Film, Image as ImageIcon, Pause, Play, Volume2, VolumeX, X } from 'lucide-react'
 import 'tldraw/tldraw.css'
@@ -3556,6 +3557,7 @@ const cowartUiOverrides = {
 const cowartComponents = {
   Toolbar: CowartToolbar,
   ImageToolbar: CowartSelectionToolbar,
+  VideoToolbar: CowartVideoSelectionToolbar,
   InFrontOfTheCanvas: CowartCanvasOverlay,
   StylePanel: CowartStylePanel
 }
@@ -3567,6 +3569,7 @@ function CowartCanvasOverlay() {
       <CowartAiDraftGenerationPanel />
       <CowartAiSlidesGenerationPanel />
       <CowartSlidesPresentationOverlay />
+      <CowartVideoFrameExtractionOverlay />
     </>
   )
 }
@@ -5127,6 +5130,17 @@ function CowartAspectLockIcon({ locked }) {
       <path d="M7 8.5V6.5a3 3 0 0 1 5.8-1.1" />
     </svg>
   )
+}
+
+function CowartVideoSelectionToolbar() {
+  const editor = useEditor()
+  const videoShapeId = useValue('cowart selected video toolbar shape id', () => {
+    const shape = editor.getOnlySelectedShape()
+    return shape?.type === 'video' ? shape.id : null
+  }, [editor])
+  if (!videoShapeId) return null
+  return <CowartVideoToolbar videoShapeId={videoShapeId}
+    renderAltTextEditor={({ onClose, shapeId }) => <CowartAltTextEditor onClose={onClose} shapeId={shapeId} />} />
 }
 
 function CowartSelectionToolbar() {
