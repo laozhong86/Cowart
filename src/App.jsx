@@ -62,7 +62,7 @@ import { getAssetUrlsByImport } from '@tldraw/assets/imports.vite'
 import { AllSelection } from '@tiptap/pm/state'
 import { renderHtmlDraftDocument } from './htmlDraftCapture.js'
 import { cowartAssetCacheKey, cowartBlobFromBase64, createCowartAssetObjectUrlCache } from './cowartAssetCache.js'
-import { MAX_VIDEO_BYTES, normalizeVideoFile, probeVideoFile, validateMediaFileSize, insertVideoAsset } from './videoImport.js'
+import { MAX_VIDEO_BYTES, normalizeVideoFile, probeVideoFile, validateMediaFileSize, insertMediaAssets } from './videoImport.js'
 import { attachCowartFilmController } from './filmPlayback.js'
 import { renderCowartFilmMp4 } from './filmExport.js'
 import { getFilmOptions, buildFilmGenerationPrompt } from './filmConfig.js'
@@ -3341,6 +3341,7 @@ const cowartUiOverrides = {
     const defaultCopyAsPng = actions['copy-as-png']
     return {
       ...actions,
+      'insert-media': { ...actions['insert-media'], onSelect: (source) => openCowartMediaImport(editor, source) },
       'copy-as-png': {
         ...defaultCopyAsPng,
         async onSelect(source) {
@@ -3431,6 +3432,8 @@ const cowartUiOverrides = {
       'tool.ai-draft': AI_DRAFT_HOLDER_LABEL,
       'tool.ai-film': AI_FILM_LABEL,
       'tool.ai-slides': AI_SLIDES_LABEL,
+      'tool.cowart-media': '导入媒体',
+      'action.insert-media': '导入媒体',
       'tool.cowart-annotation': ANNOTATION_TOOL_LABEL
     },
     'zh-cn': {
@@ -3438,12 +3441,15 @@ const cowartUiOverrides = {
       'tool.ai-draft': AI_DRAFT_HOLDER_LABEL,
       'tool.ai-film': AI_FILM_LABEL,
       'tool.ai-slides': AI_SLIDES_LABEL,
+      'tool.cowart-media': '导入媒体',
+      'action.insert-media': '导入媒体',
       'tool.cowart-annotation': ANNOTATION_TOOL_LABEL
     }
   },
   tools(editor, tools) {
     return {
       ...tools,
+      asset: { ...tools.asset, label: 'tool.cowart-media', onSelect: (source) => openCowartMediaImport(editor, source) },
       arrow: {
         ...tools.arrow,
         kbd: undefined
@@ -3570,6 +3576,7 @@ function CowartCanvasOverlay() {
       <CowartAiSlidesGenerationPanel />
       <CowartSlidesPresentationOverlay />
       <CowartVideoFrameExtractionOverlay />
+      <CowartMediaImport />
     </>
   )
 }
@@ -5999,37 +6006,59 @@ function CowartToolbarDivider() {
   return <div aria-orientation="vertical" className="cowart-toolbar-divider" role="separator" />
 }
 
-function CowartVideoImportToolbarItem() {
-  const editor = useEditor()
-  const { addToast } = useToasts()
-  const inputRef = useRef(null)
-  const [busy, setBusy] = useState(false)
+function openCowartMediaImport(editor, source) {
+  if (editor.getIsReadonly()) return
+  editor.getContainerDocument().defaultView.dispatchEvent(new CustomEvent('cowart:import-media', { detail: { source } }))
+}
 
-  async function importVideo(event) {
-    const selected = event.target.files?.[0]
+function CowartMediaImport() {
+  const editor = useEditor()
+  const { addToast, removeToast } = useToasts()
+  const trackEvent = useUiEvents()
+  const inputRef = useRef(null)
+  const busyRef = useRef(false)
+
+  useEffect(() => {
+    const win = editor.getContainerDocument().defaultView
+    const open = (event) => {
+      if (busyRef.current || editor.getIsReadonly()) return
+      trackEvent('insert-media', { source: event.detail?.source || 'toolbar' })
+      inputRef.current?.click()
+    }
+    win.addEventListener('cowart:import-media', open)
+    return () => win.removeEventListener('cowart:import-media', open)
+  }, [editor, trackEvent])
+
+  async function importMedia(event) {
+    const selected = Array.from(event.target.files || [])
     event.target.value = ''
-    if (!selected) return
-    setBusy(true)
+    if (!selected.length || busyRef.current) return
+    busyRef.current = true
+    const notice = addToast({ title: '正在导入媒体…', severity: 'info', keepOpen: true })
     try {
-      const file = normalizeVideoFile(selected)
-      await probeVideoFile(file, { document: editor.getContainerDocument() })
-      await insertVideoAsset(editor, file, createShapesForAssets)
-      addToast({ title: '视频已导入', description: '双击视频即可播放、暂停或拖动进度。', severity: 'success' })
+      const files = []
+      for (const selectedFile of selected) {
+        const isVideo = selectedFile.type.startsWith('video/') || (!selectedFile.type && /\.(mp4|webm|mov)$/i.test(selectedFile.name))
+        const file = isVideo ? normalizeVideoFile(selectedFile) : selectedFile
+        if (isVideo) await probeVideoFile(file, { document: editor.getContainerDocument() })
+        else {
+          if (!file.type.startsWith('image/')) throw new Error('请选择图片或视频文件。')
+          if (!file.size) throw new Error('图片文件为空，请重新选择。')
+          validateMediaFileSize(file)
+        }
+        files.push(file)
+      }
+      await insertMediaAssets(editor, files, createShapesForAssets)
+      addToast({ title: '媒体已导入', description: files.some((file) => file.type.startsWith('video/')) ? '双击视频即可播放、暂停或拖动进度。' : undefined, severity: 'success' })
     } catch (error) {
-      addToast({ title: '视频导入失败', description: error instanceof Error ? error.message : '请换一个文件重试。', severity: 'error' })
+      addToast({ title: '媒体导入失败', description: error instanceof Error ? error.message : '请换一个文件重试。', severity: 'error' })
     } finally {
-      setBusy(false)
+      removeToast(notice)
+      busyRef.current = false
     }
   }
 
-  return <>
-    <button type="button" className="tlui-button tlui-button__tool cowart-annotation-toolbar-button"
-      aria-label="导入视频" title="导入视频（最大 50 MB，双击播放）" data-testid="tools.cowart-video-import"
-      disabled={busy} onClick={() => inputRef.current?.click()}>
-      <Film size={20} /><span className="cowart-annotation-toolbar-label">{busy ? '读取中' : '导入视频'}</span>
-    </button>
-    <input ref={inputRef} type="file" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov" hidden onChange={importVideo} />
-  </>
+  return <input ref={inputRef} type="file" accept="image/*,video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov" multiple hidden onChange={importMedia} />
 }
 
 function CowartToolbar(props) {
@@ -6045,7 +6074,6 @@ function CowartToolbar(props) {
       <CowartToolbarItem toolId={AI_SLIDES_TOOL_ID} />
       <CowartToolbarDivider />
       <AssetToolbarItem />
-      <CowartVideoImportToolbarItem />
       <DrawToolbarItem />
       <EraserToolbarItem />
       <TextToolbarItem />

@@ -16,16 +16,24 @@ export function validateMediaFileSize(file) {
   if (file.type.startsWith('video/')) normalizeVideoFile(file)
 }
 
-export async function insertVideoAsset(editor, file, createShapesForAssets) {
-  const asset = await editor.getAssetForExternalContent({ type: 'file', file })
-  if (asset?.type !== 'video' || !asset.props?.src) throw new Error('视频读取失败，请重新选择。')
-  editor.markHistoryStoppingPoint('import video')
-  const ids = await createShapesForAssets(editor, [asset], editor.getViewportPageBounds().center)
-  const shapes = ids.map((id) => editor.getShape(id))
-  if (!shapes.length || shapes.some((shape) => shape?.type !== 'video' || shape.props.assetId !== asset.id)) {
-    throw new Error('视频导入失败，请重新选择。')
+/** Import a media selection through the native asset pipeline before creating cards. */
+export async function insertMediaAssets(editor, files, createShapesForAssets) {
+  const assets = []
+  for (const file of files) {
+    const expectedType = file.type?.startsWith('image/') ? 'image' : 'video'
+    const asset = await editor.getAssetForExternalContent({ type: 'file', file })
+    if (asset?.type !== expectedType || !asset.props?.src) throw new Error('媒体读取失败，请重新选择。')
+    assets.push(asset)
   }
-  editor.updateShapes(shapes.map((shape) => ({ id: shape.id, type: 'video', props: { autoplay: false } })))
+  if (!assets.length) return []
+  editor.markHistoryStoppingPoint('import media')
+  const ids = await createShapesForAssets(editor, assets, editor.getViewportPageBounds().center)
+  const shapes = ids.map((id) => editor.getShape(id))
+  if (shapes.length !== assets.length || shapes.some((shape, index) => shape?.type !== assets[index].type || shape.props.assetId !== assets[index].id)) {
+    throw new Error('媒体导入失败，请重新选择。')
+  }
+  const videos = shapes.filter((shape) => shape.type === 'video')
+  if (videos.length) editor.updateShapes(videos.map((shape) => ({ id: shape.id, type: 'video', props: { autoplay: false } })))
   return ids
 }
 

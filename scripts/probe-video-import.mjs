@@ -22,7 +22,7 @@ for (const outcome of ['loaded', 'error', 'timeout']) {
   assert.equal(video.onloadeddata, null)
 }
 console.log('Video import validation and cleanup passed')
-const { insertVideoAsset } = await import('../src/videoImport.js')
+const { insertMediaAssets } = await import('../src/videoImport.js')
 let resolveUpload
 let created = 0
 const stored = new Map()
@@ -38,18 +38,44 @@ const create = async (_editor, assets) => {
   stored.set('shape:video', { id: 'shape:video', type: 'video', props: { assetId: asset.id } })
   return ['shape:video']
 }
-const pendingImport = insertVideoAsset(editor, new File(['v'], 'a.mp4'), create)
+const pendingImport = insertMediaAssets(editor, [new File(['v'], 'a.mp4')], create)
 await Promise.resolve()
 assert.equal(created, 0, 'no shape before uploaded asset resolves')
 resolveUpload(asset)
 assert.deepEqual(await pendingImport, ['shape:video'])
 assert.equal(created, 1)
 editor.getAssetForExternalContent = async () => { throw new Error('upload failed') }
-await assert.rejects(insertVideoAsset(editor, {}, create), /upload failed/)
+await assert.rejects(insertMediaAssets(editor, [{}], create), /upload failed/)
 assert.equal(created, 1, 'upload rejection must not create shape')
 editor.getAssetForExternalContent = async () => ({ ...asset, props: { src: '' } })
-await assert.rejects(insertVideoAsset(editor, {}, create), /读取失败/)
+await assert.rejects(insertMediaAssets(editor, [{}], create), /读取失败/)
 assert.equal(created, 1, 'incomplete asset must not create shape')
 editor.getAssetForExternalContent = async () => asset
-await assert.rejects(insertVideoAsset(editor, {}, async () => ['shape:missing']), /导入失败/)
+await assert.rejects(insertMediaAssets(editor, [{}], async () => ['shape:missing']), /导入失败/)
 console.log('Awaited asset insertion regressions passed')
+const imageFile = new File(['image'], 'image.png', { type: 'image/png' })
+const videoFile = new File(['video'], 'video.mp4', { type: 'video/mp4' })
+const mixedAssets = [{ id: 'asset:image', type: 'image', props: { src: 'data:image/png;base64,eA==' } }, asset]
+const mixedShapes = new Map()
+const updates = []
+let completeVideo
+let batchCreated = false
+const mixedEditor = {
+  getAssetForExternalContent: async ({ file }) => file.type.startsWith('image/') ? mixedAssets[0] : await new Promise(resolve => { completeVideo = resolve }),
+  markHistoryStoppingPoint() {}, getViewportPageBounds: () => ({ center: { x: 10, y: 20 } }),
+  getShape: id => mixedShapes.get(id), updateShapes: value => updates.push(...value),
+}
+const mixed = insertMediaAssets(mixedEditor, [imageFile, videoFile], async (_editor, assets, point) => {
+  batchCreated = true
+  assert.deepEqual(assets, mixedAssets)
+  assert.deepEqual(point, { x: 10, y: 20 })
+  assets.forEach((a, i) => mixedShapes.set(`shape:mixed-${i}`, { id: `shape:mixed-${i}`, type: a.type, props: { assetId: a.id } }))
+  return ['shape:mixed-0', 'shape:mixed-1']
+})
+await new Promise(resolve => setImmediate(resolve))
+assert.equal(batchCreated, false, 'mixed selection waits for both asset uploads')
+completeVideo(asset)
+assert.deepEqual(await mixed, ['shape:mixed-0', 'shape:mixed-1'])
+assert.deepEqual(updates.map(s => s.type), ['video'], 'image records are not given video playback properties')
+assert.equal(updates[0].props.autoplay, false)
+console.log('Mixed image/video native insertion passed')
